@@ -85,9 +85,9 @@ class Connector:
                 invalidateQueueCallback()
                 params = ["python", "-m", "neuroimage_denoiser", "denoise", "--path", str(qf.path), "--outputpath", str(outputPath), "--modelpath", str(modelPath)]
 
-                Connector.currentSubprocess = subprocess.Popen(params, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", universal_newlines=True)   
+                Connector.currentSubprocess = subprocess.Popen(params, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8")   
                 Connector.currentSubprocess.wait()
-                Connector.ND_ProcessOutput(Connector.currentSubprocess.stdout, Connector.currentSubprocess.stderr, qf)
+                Connector.ND_ProcessOutput(Connector.currentSubprocess.returncode, Connector.currentSubprocess.stdout, Connector.currentSubprocess.stderr, qf)
                 #Connector.ND_ProcessOutput(stdout, Connector.currentSubprocess.stderr, qf)
                 Logger.info(f"Finished {qf.filename}")
                 invalidateQueueCallback()
@@ -120,11 +120,7 @@ class Connector:
                 continue
             else:
                 Logger.error(f"An unkown error was triggered: {line}")
-        if returncode == 1:
-            qf.status = FileStatus.EARLY_TERMINATED
-            Logger.error("Early terminated the denoising")
-            return
-        qf.status = FileStatus.UNKOWN
+        qf.status = FileStatus.EARLY_TERMINATED
         while (line := stdout.readline().removesuffix("\n")) != "":
             if(re.search(r"(Skipped )(\w+)(, because file already exists)", line)):
                 qf.status = FileStatus.ERROR_FILE_EXISTS
@@ -140,11 +136,16 @@ class Connector:
                 qf.status = FileStatus.FINISHED
             else:
                 Logger.info(f"Unparsed output from Image Denoiser: '{line}'")
-        return
+        if (qf.status == FileStatus.EARLY_TERMINATED and returncode != 1):
+            qf.status = FileStatus.NO_OUTPUT
     
     def TryCanceling():
-        Logger.info("Trying to abort denoising...")
         Connector._threadStopRequest = True
-        if Connector.currentSubprocess is None:
-            return
-        Connector.currentSubprocess.terminate()
+        _sp_running = False
+        if Connector.currentSubprocess is not None and Connector.currentSubprocess.poll() is None:
+            _sp_running = True
+            Connector.currentSubprocess.terminate()
+        if not _sp_running and (Connector.thread is None or not Connector.thread.is_alive()): 
+            Logger.info("There is no denoising running")
+        else:
+            Logger.info("Trying to abort denoising...")

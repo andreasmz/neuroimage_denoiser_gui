@@ -1,5 +1,5 @@
 [project]
-name = "Neurotorchmz"
+name = "neuroimage_denoiser_gui"
 version = "1.0.0"
 authors = [
   { name="Andreas B"},
@@ -14,7 +14,7 @@ classifiers = [
 ]
 dependencies = [
   "neuroimage_denoiser">=0.1.5,
-  "gpustat>=1.1.1"
+  "gpustat">=1.1.1,
 ]
 
 [project.urls]

@@ -3,6 +3,7 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext
 import pathlib
 import psutil
 import gpustat
+import subprocess
 
 from .utils import QueuedFile,FileQueue,FileStatus
 from .connector import Connector
@@ -49,6 +50,9 @@ class NDenoiser_GUI:
         self.menubar.add_cascade(label="File", menu=self.menuFile)
         self.menuFile.add_command(label="Open File(s)", command=self.MenuFile_OpenFile)
         self.menuFile.add_command(label="Select Output Folder", command=self.MenuFile_SelectOutputFolder)
+        self.menuFile.add_command(label="Open Output Folder", command=self.MenuFile_OpenOutputFolder)
+        self.menuFile.add_separator()
+        self.menuFile.add_command(label="Remove selected file from list", command=self.MenuFile_RemoveSelected)
 
         self.menuDenoiser = tk.Menu(self.menubar, tearoff=0)
         self.menubar.add_cascade(label="Neuroimage Denoiser", menu=self.menuDenoiser)
@@ -77,18 +81,21 @@ class NDenoiser_GUI:
         self.frameOutputPath.columnconfigure(1, weight=1)
         self.varTxtOutputPath = tk.StringVar(self.root, Settings.GetSettings("output_path"))
         self.txtOutputPath = tk.Entry(self.frameOutputPath, state="disabled", textvariable=self.varTxtOutputPath)
+        self.txtOutputPath.bind("<Button-1>", lambda _:self.MenuFile_OpenOutputFolder())
         self.txtOutputPath.grid(row=0,column=1, sticky="news")
         self.btnSelectPath = tk.Button(self.frameOutputPath, text="Select Output Path", command=self.MenuFile_SelectOutputFolder)
         self.btnSelectPath.grid(row=0, column=0)
 
         self.btnOpenFiles = tk.Button(self.frameToolsInner, text="Open File(s)", command=self.MenuFile_OpenFile)
-        self.btnOpenFiles.pack(side=tk.LEFT, padx=20)
+        self.btnOpenFiles.pack(side=tk.LEFT, padx=15)
+        self.btnRemoveSelected = tk.Button(self.frameToolsInner, text="Remove selected file", command=self.MenuFile_RemoveSelected)
+        self.btnRemoveSelected.pack(side=tk.LEFT, padx=15)
         self.btnDenoise = tk.Button(self.frameToolsInner, text="Start Denoising", command=self.MenuDenoiser_Denoise)
-        self.btnDenoise.pack(side=tk.LEFT, padx=20)
+        self.btnDenoise.pack(side=tk.LEFT, padx=15)
         self.btnCancel = tk.Button(self.frameToolsInner, text="Cancel Denoising", command=self.MenuDenoiser_Cancel)
-        self.btnCancel.pack(side=tk.LEFT,padx=20)
-        self.lblQueueStatus = tk.Label(self.frameToolsRight, text="", width=20)
-        self.lblQueueStatus.pack()
+        self.btnCancel.pack(side=tk.LEFT,padx=15)
+        #self.lblQueueStatus = tk.Label(self.frameToolsRight, text="", width=20)
+        #self.lblQueueStatus.pack()
 
 
         self.tvFiles = ttk.Treeview(self.root, columns=("Status", "Path", "Name"))
@@ -178,6 +185,29 @@ class NDenoiser_GUI:
             return
         self.varTxtOutputPath.set(path)
         Settings.SetSetting("output_path", path)
+
+    def MenuFile_OpenOutputFolder(self):
+        path = Settings.GetSettings("output_path")
+        if path is None or path == "":
+            messagebox.showwarning("Neuroimage Denoiser", "You must first set an output path")
+            return
+        path = pathlib.Path(path)
+        if not path.exists():
+            messagebox.showerror("Neuroimage Denoiser", "The path is invalid")
+            return
+        subprocess.Popen(["explorer", path])
+
+    def MenuFile_RemoveSelected(self):
+        if len(self.tvFiles.selection()) != 1:
+            self.root.bell()
+            return
+        selectionIndex = self.tvFiles.selection()[0]
+        qf = self.queueFiles[selectionIndex]
+        if qf.status == FileStatus.RUNNING:
+            messagebox.showinfo("Neuroimage Denoiser", "Can't remove running items from the list")
+            return
+        self.queueFiles.remove(selectionIndex)
+        self.UpdateTVFiles()
 
     def MenuDenoiser_TestInstallation(self):
         Connector.TestInstallation()

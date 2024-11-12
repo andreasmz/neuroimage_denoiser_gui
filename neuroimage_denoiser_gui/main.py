@@ -4,4 +4,4 @@ if __name__ == "__main__":
     path = os.path.abspath(path)
     sys.path.insert(1, path)
 
-import ndenoiser_gui
+import neuroimage_denoiser_gui

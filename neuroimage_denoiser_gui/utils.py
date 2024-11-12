@@ -6,8 +6,9 @@ class FileStatus(Enum):
     QUEUED = "Queued"
     RUNNING = "Running"
     FINISHED = "Finished"
-    EARLY_TERMINATED = "EARLY_TERMINATED"
+    EARLY_TERMINATED = "Early terminated"
     UNKOWN = "Unkown"
+    NO_OUTPUT = "Unkown due to no output"
     ERROR = "Failed"
     ERROR_FILE_EXISTS = "Output file already exists"
     ERROR_NDENOISER_UNKOWN = "Unexpected Error in DENOISER"
@@ -16,7 +17,7 @@ class FileStatus(Enum):
         match (fs):
             case FileStatus.ERROR | FileStatus.ERROR_FILE_EXISTS | FileStatus.ERROR_NDENOISER_UNKOWN | FileStatus.EARLY_TERMINATED:
                 return "red"
-            case FileStatus.UNKOWN:
+            case FileStatus.UNKOWN | FileStatus.NO_OUTPUT:
                 return "light_orange"
             case FileStatus.RUNNING:
                 return "grey"
@@ -50,7 +51,7 @@ class FileQueue:
     def __init__(self):
         self._fileQueue = {}
 
-    def __getitem__(self, key):
+    def __getitem__(self, key) -> QueuedFile:
         return self._fileQueue[key]
     
     def __setitem__(self, key, value):
@@ -59,6 +60,9 @@ class FileQueue:
     def AddFile(self, qf: QueuedFile):
         if qf.id not in self._fileQueue.keys():
             self._fileQueue[qf.id] = qf
+
+    def remove(self, key):
+        self._fileQueue.pop(key)
 
     def keys(self):
         return self._fileQueue.keys()
