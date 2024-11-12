@@ -13,8 +13,8 @@ classifiers = [
     "Programming Language :: Python :: 3",
 ]
 dependencies = [
-  "neuroimage_denoiser">=0.1.5,
-  "gpustat">=1.1.1,
+  "neuroimage_denoiser>=0.1.5",
+  "gpustat>=1.1.1",
 ]
 
 [project.urls]
