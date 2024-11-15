@@ -5,3 +5,4 @@ if __name__ == "__main__":
     sys.path.insert(1, path)
 
 import neuroimage_denoiser_gui
+gui = neuroimage_denoiser_gui.NDenoiser_GUI()

@@ -3,9 +3,8 @@ import os
 import re
 import subprocess
 import threading
-import time
+import sys
 import pathlib
-from io import StringIO
 from typing import IO
 
 from .logger import Logger
@@ -14,7 +13,7 @@ from .utils import QueuedFile,FileQueue, FileStatus
 class Connector:
 
     thread: threading.Thread | None = None
-    currentSubprocess: subprocess.Popen = None
+    currentSubprocess: subprocess.CompletedProcess = None
     _threadStopRequest = False
 
     def ImportNDenoiser() -> bool:
@@ -83,10 +82,19 @@ class Connector:
                 qf.status = FileStatus.RUNNING
                 Logger.info(f"Denoising {qf.filename}")
                 invalidateQueueCallback()
-                params = ["python", "-m", "neuroimage_denoiser", "denoise", "--path", str(qf.path), "--outputpath", str(outputPath), "--modelpath", str(modelPath)]
+                #params = ["python", "-m", "neuroimage_denoiser", "denoise", "--path", str(qf.path), "--outputpath", str(outputPath), "--modelpath", str(modelPath)]
+                params = ["python", r"C:\Users\abril\Andreas Eigene Dateien\Programmieren\VS Code\Git\neuroimage_denoiser_gui\dev\test2.py"]
 
-                Connector.currentSubprocess = subprocess.Popen(params, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8")   
+                #stdout_buffer = BytesIO()
+                #stdout = TextIOWrapper(stdout_buffer, encoding="utf-8", line_buffering=True)
+                #Connector.currentSubprocess = subprocess.Popen(params, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", bufsize=-1)
+                Connector.currentSubprocess = subprocess.Popen(params, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", bufsize=-1)
+                #Connector.currentSubprocess = None
+                #Connector.currentSubprocess = subprocess.run(params, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                #Connector.currentSubprocess = subprocess.Popen(params, stderr=subprocess.PIPE, text=True, encoding="utf-8", bufsize=-1)   
                 Connector.currentSubprocess.wait()
+                
+                #Connector.ND_ProcessOutput(Connector.currentSubprocess.returncode, Connector.currentSubprocess.stdout, Connector.currentSubprocess.stderr, qf)
                 Connector.ND_ProcessOutput(Connector.currentSubprocess.returncode, Connector.currentSubprocess.stdout, Connector.currentSubprocess.stderr, qf)
                 #Connector.ND_ProcessOutput(stdout, Connector.currentSubprocess.stderr, qf)
                 Logger.info(f"Finished {qf.filename}")
@@ -103,6 +111,7 @@ class Connector:
         return False
     
     def ND_ProcessOutput(returncode, stdout: IO[str], stderr: IO[str], qf: QueuedFile):
+    #def ND_ProcessOutput(returncode, stdout: str, stderr: str, qf: QueuedFile):    
         if stdout is None or stdout == "None":
             qf.status = FileStatus.ERROR
             return
@@ -111,6 +120,7 @@ class Connector:
             return
         
         while (line := stderr.readline().removesuffix("\n")) != "":
+        #for line in stderr.split(";"):
             if("FutureWarning: You are using `torch.load` with `weights_only=False`" in line):
                 Logger.info("Neuroimage Denoise issued FutureWarning on torch")
                 continue
@@ -122,6 +132,7 @@ class Connector:
                 Logger.error(f"An unkown error was triggered: {line}")
         qf.status = FileStatus.EARLY_TERMINATED
         while (line := stdout.readline().removesuffix("\n")) != "":
+        #for line in stdout.split(";"):
             if(re.search(r"(Skipped )(\w+)(, because file already exists)", line)):
                 qf.status = FileStatus.ERROR_FILE_EXISTS
                 return
@@ -143,6 +154,7 @@ class Connector:
         Connector._threadStopRequest = True
         _sp_running = False
         if Connector.currentSubprocess is not None and Connector.currentSubprocess.poll() is None:
+        #if Connector.currentSubprocess is not None and Connector.currentSubprocess.returncode is None:    
             _sp_running = True
             Connector.currentSubprocess.terminate()
         if not _sp_running and (Connector.thread is None or not Connector.thread.is_alive()): 
