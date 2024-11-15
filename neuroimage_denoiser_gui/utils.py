@@ -3,6 +3,7 @@ import uuid
 import pathlib
 
 class FileStatus(Enum):
+    _EMPTY = "-"
     QUEUED = "Queued"
     RUNNING = "Running"
     FINISHED = "Finished"
@@ -25,15 +26,41 @@ class FileStatus(Enum):
                 return "green"
             case _:
                 return ""
+            
+    def Get_Significance(fs):
+        match (fs):
+            case FileStatus.ERROR | FileStatus.UNKOWN:
+                return 30
+            case FileStatus.ERROR_NDENOISER_UNKOWN:
+                return 23
+            case FileStatus.ERROR_FILE_EXISTS:
+                return 22
+            case FileStatus.NO_OUTPUT:
+                return 21
+            case FileStatus.EARLY_TERMINATED:
+                return 20
+            case FileStatus.QUEUED | FileStatus.RUNNING | FileStatus.FINISHED:
+                return 10
+            case FileStatus._EMPTY:
+                return 0
+            case _:
+                return 100
+            
+    def Get_MostSignificant(listfs: list):
+        fsMax = FileStatus._EMPTY
+        if listfs is None or len(listfs) == 0:
+            return None
+        for fs in listfs:
+            if FileStatus.Get_Significance(fs) > FileStatus.Get_Significance(fsMax):
+                fsMax = fs
+        return fsMax
 
-class QueuedFile:
-    def __init__(self, path):
+class QueuedObject:
+    def __init__(self, path: str):
         self._path = pathlib.Path(path)
-        if (not self._path.is_file()):
-            raise ValueError("The given path is not a file")
         self.id = str(uuid.uuid4())
         self.status: FileStatus = FileStatus.QUEUED
-
+    
     @property
     def basepath(self):
         return self._path.parent
@@ -45,19 +72,38 @@ class QueuedFile:
     @property
     def path(self):
         return self._path
+
+class QueuedFile(QueuedObject):
+    def __init__(self, path: str):
+        super().__init__(path)
+        if (not self._path.is_file()):
+            raise ValueError("The given path is not a file")
     
+class QueuedFolder(QueuedObject):
+    def __init__(self, path):
+        super().__init__(path)
+        if not self._path.is_dir():
+            raise ValueError("The given path is not a directory")
+        
+    @property
+    def basepath(self):
+        return self._path
+    
+    @property
+    def filename(self):
+        return ""
 
 class FileQueue:
     def __init__(self):
         self._fileQueue = {}
 
-    def __getitem__(self, key) -> QueuedFile:
+    def __getitem__(self, key) -> QueuedObject:
         return self._fileQueue[key]
     
     def __setitem__(self, key, value):
         self._fileQueue[key] = value
 
-    def AddFile(self, qf: QueuedFile):
+    def AddFile(self, qf: QueuedObject):
         if qf.id not in self._fileQueue.keys():
             self._fileQueue[qf.id] = qf
 
@@ -73,7 +119,7 @@ class FileQueue:
     def values(self):
         return self._fileQueue.values()
 
-    def PopQueued(self) -> QueuedFile | None:
+    def PopQueued(self) -> QueuedObject | None:
         for id, qf in self._fileQueue.items():
            if qf.status == FileStatus.QUEUED:
                return qf

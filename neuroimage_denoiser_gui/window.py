@@ -5,9 +5,9 @@ import psutil
 import gpustat
 import subprocess
 
-from .utils import QueuedFile,FileQueue,FileStatus
+from .utils import *
 from .connector import Connector
-from .logger import Logger
+from .logger import Logger, LogLevel
 from .config import NDenoiser_Settings as Settings
 
 class NDenoiser_GUI:
@@ -49,6 +49,7 @@ class NDenoiser_GUI:
         self.menuFile = tk.Menu(self.menubar,tearoff=0)
         self.menubar.add_cascade(label="File", menu=self.menuFile)
         self.menuFile.add_command(label="Open File(s)", command=self.MenuFile_OpenFile)
+        self.menuFile.add_command(label="Open Folder", command=self.MenuFile_OpenFolder)
         self.menuFile.add_command(label="Select Output Folder", command=self.MenuFile_SelectOutputFolder)
         self.menuFile.add_command(label="Open Output Folder", command=self.MenuFile_OpenOutputFolder)
         self.menuFile.add_separator()
@@ -65,6 +66,7 @@ class NDenoiser_GUI:
         self.menuAbout = tk.Menu(self.menubar, tearoff=0)
         self.menubar.add_cascade(label="About", menu=self.menuAbout)
         self.menuAbout.add_command(label="Info", command=self.MenuAbout_Info)
+        self.menuAbout.add_command(label="Start debugging", command=self.MenuAbout_Debug)
 
         self.frameTools = tk.Frame(self.root)
         self.frameTools.pack(side=tk.TOP, fill="x")
@@ -86,8 +88,10 @@ class NDenoiser_GUI:
         self.btnSelectPath = tk.Button(self.frameOutputPath, text="Select Output Path", command=self.MenuFile_SelectOutputFolder)
         self.btnSelectPath.grid(row=0, column=0)
 
-        self.btnOpenFiles = tk.Button(self.frameToolsInner, text="Open File(s)", command=self.MenuFile_OpenFile)
+        self.btnOpenFiles = tk.Button(self.frameToolsInner, text="📗 Open File(s)", command=self.MenuFile_OpenFile)
         self.btnOpenFiles.pack(side=tk.LEFT, padx=15)
+        self.btnOpenFolder = tk.Button(self.frameToolsInner, text="📁 Open Folder", command=self.MenuFile_OpenFolder)
+        self.btnOpenFolder.pack(side=tk.LEFT, padx=15)
         self.btnRemoveSelected = tk.Button(self.frameToolsInner, text="Remove selected file", command=self.MenuFile_RemoveSelected)
         self.btnRemoveSelected.pack(side=tk.LEFT, padx=15)
         self.btnDenoise = tk.Button(self.frameToolsInner, text="Start Denoising", command=self.MenuDenoiser_Denoise)
@@ -103,7 +107,7 @@ class NDenoiser_GUI:
         self.tvFiles.heading("Status", text="Status")
         self.tvFiles.heading("Path", text="Path")
         self.tvFiles.heading("Name", text="Name")
-        self.tvFiles.column("#0", width=15, stretch=False)
+        self.tvFiles.column("#0", width=40, stretch=False)
         self.tvFiles.column("Status", width=200, stretch=False)
         self.tvFiles.tag_configure('', background = '#ededed')
         self.tvFiles.tag_configure('grey', background = '#c4c4c4')
@@ -112,7 +116,7 @@ class NDenoiser_GUI:
         self.tvFiles.tag_configure('light_orange', background = '#f2c377')
         self.tvFiles.pack(fill="both", expand=True)
 
-
+        Logger.info(f"Currently selected model path: {pathlib.Path(Settings.GetSettings('model_path'))}")
         Logger.info("Started Neuroimage Denoiser GUI")
         self.UpdateTVFiles()
         self._Statusbar_Tick()
@@ -158,16 +162,22 @@ class NDenoiser_GUI:
                 self.tvFiles.delete(qfIndex)
                 continue
             _files.remove(qfIndex)
-            qf: QueuedFile = self.queueFiles[qfIndex]
+            qf: QueuedObject = self.queueFiles[qfIndex]
             if entryValues[0] != qf.status.value:
                 self.tvFiles.item(qf.id, tags=[FileStatus.Get_Color(qf.status)])
                 self.tvFiles.set(qf.id, column="Status", value=qf.status.value)
         for qfIndex in _files:
             qf = self.queueFiles[qfIndex]
-            self.tvFiles.insert('', 'end', iid=qf.id, text="", values=(qf.status.value, qf.basepath, qf.filename), tags=[FileStatus.Get_Color(qf.status)])
+            if isinstance(qf, QueuedFile):
+                text = "🖻"
+            elif isinstance(qf, QueuedFolder):
+                text = "📁"
+            else:
+                text = ""
+            self.tvFiles.insert('', 'end', iid=qf.id, text=text, values=(qf.status.value, qf.basepath, qf.filename), tags=[FileStatus.Get_Color(qf.status)])
 
     def MenuFile_OpenFile(self):
-        files = filedialog.askopenfilenames(parent=self.root, title="Neuroimage Denoiser - Open an file", 
+        files = filedialog.askopenfilenames(parent=self.root, title="Neuroimage Denoiser - Open a file", 
                 filetypes=(("All compatible files", "*.tif *.tiff *.stk *.nd2"), 
                            ("TIF File", "*.tif *.tiff *.stk"), 
                            ("ND2 Files (NIS Elements)", "*.nd2"), 
@@ -178,6 +188,15 @@ class NDenoiser_GUI:
             qf = QueuedFile(path)
             self.queueFiles[qf.id] = qf
         self.UpdateTVFiles()
+
+    def MenuFile_OpenFolder(self):
+        path = filedialog.askdirectory(parent=self.root, title="Neuroimage Denoiser - Open a folder")
+        if path is None or path == "":
+            return
+        qf = QueuedFolder(path)
+        self.queueFiles[qf.id] = qf
+        self.UpdateTVFiles()
+        
 
     def MenuFile_SelectOutputFolder(self):
         path = filedialog.askdirectory(parent=self.root, title="Neuroimage Denoiser - Select output path")
@@ -206,6 +225,7 @@ class NDenoiser_GUI:
         if qf.status == FileStatus.RUNNING:
             messagebox.showinfo("Neuroimage Denoiser", "Can't remove running items from the list")
             return
+        Logger.debug(f"Removing {selectionIndex}")
         self.queueFiles.remove(selectionIndex)
         self.UpdateTVFiles()
 
@@ -222,9 +242,21 @@ class NDenoiser_GUI:
         if file is None or file == "":
             return
         Settings.SetSetting("model_path", file, save=True)
+        Logger.info(f"Set model path to {pathlib.Path(Settings.GetSettings('model_path'))}")
 
     def MenuDenoiser_Denoise(self):
-        Connector.Denoise(self.queueFiles, pathlib.Path(self.varTxtOutputPath.get()), pathlib.Path(Settings.GetSettings("model_path")), self.UpdateTVFiles)
+        outputpath = self.varTxtOutputPath.get()
+        if outputpath is None or outputpath == "":
+            self.root.bell()
+            Logger.error("Please first set an output path")
+            return
+        Connector.Denoise(self.queueFiles, pathlib.Path(outputpath), pathlib.Path(Settings.GetSettings("model_path")), self.UpdateTVFiles)
 
     def MenuAbout_Info(self):
         messagebox.showinfo("Neuroimage Denoiser", "Neuroimage Denoiser for removing noise from transient fluorescent signals in functional imaging\nStephan Weissbach, Jonas Milkovits, Michela Borghi, Carolina Amaral, Abderazzaq El Khallouqi, Susanne Gerber, Martin Heine bioRxiv 2024.06.08.598061; doi: https://doi.org/10.1101/2024.06.08.598061\n\nGUI Implementation by Andreas Brilka")
+
+    def MenuAbout_Debug(self):
+        if(not messagebox.askyesnocancel("Neuroimage Denoiser", "Are you sure you want to enable debugging mode?")):
+            return
+        Logger.level = LogLevel.DEBUG
+        Logger.debug("Enabled debugging output")

@@ -8,7 +8,7 @@ import pathlib
 from typing import IO
 
 from .logger import Logger
-from .utils import QueuedFile,FileQueue, FileStatus
+from .utils import *
 
 class Connector:
 
@@ -63,7 +63,7 @@ class Connector:
 
 
     def Denoise(fileQueue:FileQueue, outputPath: pathlib.Path, modelPath: pathlib.Path, invalidateQueueCallback):
-        if outputPath is None or not outputPath.exists():
+        if outputPath is None or not outputPath.exists() or len(str(outputPath)) <= 3:
             Logger.error("Your output path is invalid")
             return
         if modelPath is None or not modelPath.exists():
@@ -82,21 +82,19 @@ class Connector:
                 qf.status = FileStatus.RUNNING
                 Logger.info(f"Denoising {qf.filename}")
                 invalidateQueueCallback()
-                #params = ["python", "-m", "neuroimage_denoiser", "denoise", "--path", str(qf.path), "--outputpath", str(outputPath), "--modelpath", str(modelPath)]
-                params = ["python", r"C:\Users\abril\Andreas Eigene Dateien\Programmieren\VS Code\Git\neuroimage_denoiser_gui\dev\test2.py"]
+                if isinstance(qf, QueuedFile):
+                    params = ["python", "-m", "neuroimage_denoiser", "denoise", "--path", str(qf.path), "--outputpath", str(outputPath), "--modelpath", str(modelPath)]
+                elif isinstance(qf, QueuedFolder):
+                    params = ["python", "-m", "neuroimage_denoiser", "denoise", "--path", str(qf.path), "--outputpath", str(outputPath), "--modelpath", str(modelPath), "--directory_mode"]
+                else:
+                    raise RuntimeError("A provided Queued Object has an invalid type")
+                Logger.debug(" ".join(params))
 
-                #stdout_buffer = BytesIO()
-                #stdout = TextIOWrapper(stdout_buffer, encoding="utf-8", line_buffering=True)
-                #Connector.currentSubprocess = subprocess.Popen(params, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", bufsize=-1)
-                Connector.currentSubprocess = subprocess.Popen(params, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", bufsize=-1)
-                #Connector.currentSubprocess = None
-                #Connector.currentSubprocess = subprocess.run(params, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                #Connector.currentSubprocess = subprocess.Popen(params, stderr=subprocess.PIPE, text=True, encoding="utf-8", bufsize=-1)   
+                env = os.environ.copy()
+                env["PYTHONIOENCODING"] = "utf-8" # Alive progress in Stephans code needs utf-8. By default, python uses the wrong encoding. Setting the encoding in subprocess Popen only enables a conversion afterwards
+                Connector.currentSubprocess = subprocess.Popen(params, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", bufsize=-1)
                 Connector.currentSubprocess.wait()
-                
-                #Connector.ND_ProcessOutput(Connector.currentSubprocess.returncode, Connector.currentSubprocess.stdout, Connector.currentSubprocess.stderr, qf)
                 Connector.ND_ProcessOutput(Connector.currentSubprocess.returncode, Connector.currentSubprocess.stdout, Connector.currentSubprocess.stderr, qf)
-                #Connector.ND_ProcessOutput(stdout, Connector.currentSubprocess.stderr, qf)
                 Logger.info(f"Finished {qf.filename}")
                 invalidateQueueCallback()
             Logger.info("---Finished Denoising---")
@@ -110,54 +108,59 @@ class Connector:
             return True
         return False
     
-    def ND_ProcessOutput(returncode, stdout: IO[str], stderr: IO[str], qf: QueuedFile):
-    #def ND_ProcessOutput(returncode, stdout: str, stderr: str, qf: QueuedFile):    
+    def ND_ProcessOutput(returncode, stdout: IO[str], stderr: IO[str], qf: QueuedObject):
         if stdout is None or stdout == "None":
             qf.status = FileStatus.ERROR
             return
         if stderr is None or stderr == "None":
             qf.status = FileStatus.ERROR
             return
-        
+        status = []
         while (line := stderr.readline().removesuffix("\n")) != "":
-        #for line in stderr.split(";"):
             if("FutureWarning: You are using `torch.load` with `weights_only=False`" in line):
                 Logger.info("Neuroimage Denoise issued FutureWarning on torch")
+                Logger.debug(line)
                 continue
             elif("torch.load(weights" in line):
+                Logger.debug(line)
                 continue
             elif(line.strip() == ""):
                 continue
             else:
                 Logger.error(f"An unkown error was triggered: {line}")
-        qf.status = FileStatus.EARLY_TERMINATED
         while (line := stdout.readline().removesuffix("\n")) != "":
-        #for line in stdout.split(";"):
-            if(re.search(r"(Skipped )(\w+)(, because file already exists)", line)):
-                qf.status = FileStatus.ERROR_FILE_EXISTS
-                return
-            elif(re.search(r"(Skipped )(\w+)(, due to an unexpected error)", line)):
-                qf.status = FileStatus.ERROR_NDENOISER_UNKOWN
-                return
-            elif(line.strip() == ""):
+            Logger.debug(line)
+            re1 = re.search(r"on ([0-9]{1,3}): Skipped (.+), because file already exists", line)
+            re2 = re.search(r"on ([0-9]{1,3}): Skipped (.+), due to an unexpected error", line)
+            re3 = re.search(r"on ([0-9]{1,3}): Saved image \(([^\)]+)\) as:", line)
+            if(line.strip() == ""):
                 continue
-            elif("Saved image " in line):
-                qf.status = FileStatus.FINISHED
+            elif re1:
+                status.append(FileStatus.ERROR_FILE_EXISTS)
+                Logger.error(f"Skipped {re1.groups(1)}, as the output file already exists")
+            elif re2:
+                status.append(FileStatus.ERROR_NDENOISER_UNKOWN)
+                Logger.error(f"Unkown error on {re1.groups(1)}")
+            elif re3:
+                status.append(FileStatus.FINISHED)
             elif(re.search(r"\| [0-9]{0,3}\/[0-9]{0,3} \[[0-9]{1,3}\%\] in ", line)):
-                qf.status = FileStatus.FINISHED
+                status.append(FileStatus.FINISHED)
             else:
                 Logger.info(f"Unparsed output from Image Denoiser: '{line}'")
-        if (qf.status == FileStatus.EARLY_TERMINATED and returncode != 1):
-            qf.status = FileStatus.NO_OUTPUT
+        qf.status = FileStatus.Get_MostSignificant(status)
+        if (qf.status == None):
+            if returncode == 1:
+                qf.status = FileStatus.EARLY_TERMINATED
+            else:
+                qf.status = FileStatus.NO_OUTPUT
     
     def TryCanceling():
         Connector._threadStopRequest = True
         _sp_running = False
         if Connector.currentSubprocess is not None and Connector.currentSubprocess.poll() is None:
-        #if Connector.currentSubprocess is not None and Connector.currentSubprocess.returncode is None:    
             _sp_running = True
             Connector.currentSubprocess.terminate()
         if not _sp_running and (Connector.thread is None or not Connector.thread.is_alive()): 
             Logger.info("There is no denoising running")
         else:
-            Logger.info("Trying to abort denoising...")
+            Logger.error("Canceled denoising")
