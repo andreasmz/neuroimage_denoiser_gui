@@ -26,3 +26,9 @@ python -m neuroimage_denoiser_gui
 **Neuroimage Denoiser for removing noise from transient fluorescent signals in functional imaging.**
 Stephan Weissbach, Jonas Milkovits, Michela Borghi, Carolina Amaral, Abderazzaq El Khallouqi, Susanne Gerber, Martin Heine
 *bioRxiv* 2024.06.08.598061; doi: https://doi.org/10.1101/2024.06.08.598061
+
+## Gallery
+
+<p align="center">
+    <img src="https://raw.githubusercontent.com/andreasmz/neuroimage_denoiser_gui/main/neuroimage_denoiser_screenshot01.png" style="max-width: 600px;">
+</p> 
