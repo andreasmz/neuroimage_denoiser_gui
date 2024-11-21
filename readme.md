@@ -5,7 +5,7 @@
 ![Dynamic TOML Badge](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fandreasmz%2Fneuroimage_denoiser_gui%2Fmain%2Fpyproject.toml&query=%24.project.classifiers%5B1%5D&label=PyProject.toml&color=09bd2d)
 
 
-A simple implementation of a user GUI for [Neuroimage Denoiser](https://github.com/s-weissbach/neuroimage_denoiser) for iternal use in the AG Heine. All credits of the program itself go to
+A simple implementation of a user GUI for [Neuroimage Denoiser](https://github.com/s-weissbach/neuroimage_denoiser) for iternal use in the AG Heine. All credits of the program itself go to Weissbach et al.
 
 ## Installation
 Create an environment (for example using conda) and type inside of it
