@@ -58,6 +58,7 @@ class NDenoiser_GUI:
         self.menuDenoiser = tk.Menu(self.menubar, tearoff=0)
         self.menubar.add_cascade(label="Neuroimage Denoiser", menu=self.menuDenoiser)
         self.menuDenoiser.add_command(label="Test Installation", command=self.MenuDenoiser_TestInstallation)
+        self.menuDenoiser.add_command(label="TInstall CUDA Fix", command=self.MenuDenoiser_CUDAFix)
         self.menuDenoiser.add_command(label="Locate Model", command=self.MenuDenoiser_LocateModel)
         self.menuDenoiser.add_separator()
         self.menuDenoiser.add_command(label="Denoise", command=self.MenuDenoiser_Denoise)
@@ -231,6 +232,9 @@ class NDenoiser_GUI:
 
     def MenuDenoiser_TestInstallation(self):
         Connector.TestInstallation()
+
+    def MenuDenoiser_CUDAFix(self):
+        Connector.CudaFix()
 
     def MenuDenoiser_Cancel(self):
         Connector.TryCanceling()

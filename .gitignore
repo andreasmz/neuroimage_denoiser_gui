@@ -2,4 +2,3 @@ __pycache__/
 *.pyc
 .pypirc
 build
-dist

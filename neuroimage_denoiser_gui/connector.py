@@ -53,13 +53,24 @@ class Connector:
                 Logger.error("Torch was not found")
                 return
             if not torch.cuda.is_available():
-                Logger.error("CUDA is not available. It is NOT recommened to proceed")
+                Logger.error("CUDA is not available. It is NOT recommended to proceed")
                 return
             Logger.info("CUDA is ready for use")
 
 
         t = threading.Thread(target=_run, daemon=True)
         t.start()
+
+    def CudaFix():
+        args = "pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126 --upgrade"
+        Logger.info("Starting CUDA fix. Please wait---")
+        Logger.debug(args)
+        result = subprocess.run(args.split(" "), env=os.environ.copy(), capture_output=True)
+        for l in str(result.stderr.split("\n")):
+            Logger.error(l)
+        for l in str(result.stdout.split("\n")):
+            Logger.debug(l)
+        Logger.info("---Finished CUDA fix---")
 
 
     def Denoise(fileQueue:FileQueue, outputPath: pathlib.Path, modelPath: pathlib.Path, invalidateQueueCallback):
