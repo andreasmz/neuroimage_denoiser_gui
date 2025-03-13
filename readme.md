@@ -11,7 +11,7 @@ A simple implementation of a user GUI for [Neuroimage Denoiser](https://github.c
 Create an environment (for example using conda) and type inside of it
 
 ```bash
-pip install neuroimage-denoiser-gui
+pip install neuroimage_denoiser_gui
 ```
 
 You can now access it using 

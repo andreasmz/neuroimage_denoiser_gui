@@ -1,14 +1,20 @@
+import logging.handlers
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 import pathlib
 import psutil
 import gpustat
 import subprocess
+from datetime import datetime
+import shutil
+
+import logging
+logger = logging.getLogger("Neuroimage_Denoiser_GUI")
 
 from .utils import *
 from .connector import Connector
-from .logger import Logger, LogLevel
 from .config import NDenoiser_Settings as Settings
+
 
 class NDenoiser_GUI:
 
@@ -19,8 +25,7 @@ class NDenoiser_GUI:
     def InitGUI(self):
         self.root = tk.Tk()
         self.root.title("Neuroimage Denoiser GUI")
-        self.root.geometry("600x600")
-        self.root.protocol("WM_DELETE_WINDOW", self.On_Closing)
+        self.root.geometry("900x600")
 
         self.frameStatusbar = tk.Frame(self.root)
         self.frameStatusbar.pack(side=tk.BOTTOM, fill="x")
@@ -39,8 +44,9 @@ class NDenoiser_GUI:
         self.txtLog = scrolledtext.ScrolledText(self.root, height=10)
         self.txtLog.configure(state='disabled')
         self.txtLog.pack(side=tk.BOTTOM, fill="x")
-        Logger.SetTextLog(self.txtLog)
-        
+        self.txtLoggingHandler = LoggingHandlerTxt(self.txtLog)
+        self.txtLoggingHandler.setLevel(logging.INFO)
+        logger.addHandler(self.txtLoggingHandler)
 
         Connector.ImportNDenoiser()
 
@@ -58,8 +64,8 @@ class NDenoiser_GUI:
         self.menuDenoiser = tk.Menu(self.menubar, tearoff=0)
         self.menubar.add_cascade(label="Neuroimage Denoiser", menu=self.menuDenoiser)
         self.menuDenoiser.add_command(label="Test Installation", command=self.MenuDenoiser_TestInstallation)
-        self.menuDenoiser.add_command(label="TInstall CUDA Fix", command=self.MenuDenoiser_CUDAFix)
-        self.menuDenoiser.add_command(label="Locate Model", command=self.MenuDenoiser_LocateModel)
+        self.menuDenoiser.add_command(label="Install CUDA Fix", command=self.MenuDenoiser_CUDAFix)
+        self.menuDenoiser.add_command(label="Import Model", command=self.MenuDenoiser_ImportModel)
         self.menuDenoiser.add_separator()
         self.menuDenoiser.add_command(label="Denoise", command=self.MenuDenoiser_Denoise)
         self.menuDenoiser.add_command(label="Cancel Denoising", command=self.MenuDenoiser_Cancel)
@@ -79,15 +85,22 @@ class NDenoiser_GUI:
         self.frameToolsRight = tk.Frame(self.frameTools)
         self.frameToolsRight.grid(row=0, column=2, sticky="ne")
 
-        self.frameOutputPath = tk.Frame(self.frameTools)
-        self.frameOutputPath.grid(row=1, column=0, columnspan=3, sticky="news")
-        self.frameOutputPath.columnconfigure(1, weight=1)
+        self.framePaths = tk.Frame(self.frameTools)
+        self.framePaths.grid(row=1, column=0, columnspan=3, sticky="news")
+        self.framePaths.columnconfigure(3, weight=1)
+        self.btnImportModel = tk.Button(self.framePaths, text="Import Model", command=self.MenuDenoiser_ImportModel)
+        self.btnImportModel.grid(row=0, column=0)
+        self.varModelName = tk.StringVar(self.root, Settings.GetSettings("model_name") if Settings.GetSettings("model_name") is not None else "")
+        self.txtModelName = tk.Entry(self.framePaths, state="disabled", textvariable=self.varModelName, width=30)
+        self.txtModelName.bind("<Button-1>", lambda _:self.MenuDenoiser_ImportModel())
+        self.txtModelName.grid(row=0,column=1, sticky="news")
+
         self.varTxtOutputPath = tk.StringVar(self.root, Settings.GetSettings("output_path"))
-        self.txtOutputPath = tk.Entry(self.frameOutputPath, state="disabled", textvariable=self.varTxtOutputPath)
+        self.txtOutputPath = tk.Entry(self.framePaths, state="disabled", textvariable=self.varTxtOutputPath)
         self.txtOutputPath.bind("<Button-1>", lambda _:self.MenuFile_OpenOutputFolder())
-        self.txtOutputPath.grid(row=0,column=1, sticky="news")
-        self.btnSelectPath = tk.Button(self.frameOutputPath, text="Select Output Path", command=self.MenuFile_SelectOutputFolder)
-        self.btnSelectPath.grid(row=0, column=0)
+        self.txtOutputPath.grid(row=0,column=3, sticky="news")
+        self.btnSelectPath = tk.Button(self.framePaths, text="Select Output Path", command=self.MenuFile_SelectOutputFolder)
+        self.btnSelectPath.grid(row=0, column=2)
 
         self.btnOpenFiles = tk.Button(self.frameToolsInner, text="📗 Open File(s)", command=self.MenuFile_OpenFile)
         self.btnOpenFiles.pack(side=tk.LEFT, padx=15)
@@ -117,8 +130,7 @@ class NDenoiser_GUI:
         self.tvFiles.tag_configure('light_orange', background = '#f2c377')
         self.tvFiles.pack(fill="both", expand=True)
 
-        Logger.info(f"Currently selected model path: {pathlib.Path(Settings.GetSettings('model_path'))}")
-        Logger.info("Started Neuroimage Denoiser GUI")
+        logger.info("Started Neuroimage Denoiser GUI")
         self.UpdateTVFiles()
         self._Statusbar_Tick()
         self.root.mainloop()
@@ -146,14 +158,7 @@ class NDenoiser_GUI:
             self.lblStatusGPU["text"] = "GPU: Not available"
             self.lblStatusGPU2["text"] = ""
             self.lblStatusGPU3["text"] = ""
-        self.root.after(1000, self._Statusbar_Tick)
-
-    def On_Closing(self):
-        try:
-            Settings.SaveConfig()
-        except Exception as ex:
-            print(ex)
-        self.root.destroy()
+        self.root.after(2000, self._Statusbar_Tick)
 
     def UpdateTVFiles(self):
         _files = [x for x in self.queueFiles.keys()]
@@ -203,8 +208,10 @@ class NDenoiser_GUI:
         path = filedialog.askdirectory(parent=self.root, title="Neuroimage Denoiser - Select output path")
         if path is None or path == "":
             return
+        Settings.SetSetting("output_path", path, save=True)
         self.varTxtOutputPath.set(path)
-        Settings.SetSetting("output_path", path)
+        logger.info(f"Set output path to {path}")
+        
 
     def MenuFile_OpenOutputFolder(self):
         path = Settings.GetSettings("output_path")
@@ -226,7 +233,7 @@ class NDenoiser_GUI:
         if qf.status == FileStatus.RUNNING:
             messagebox.showinfo("Neuroimage Denoiser", "Can't remove running items from the list")
             return
-        Logger.debug(f"Removing {selectionIndex}")
+        logger.debug(f"Removing {selectionIndex}")
         self.queueFiles.remove(selectionIndex)
         self.UpdateTVFiles()
 
@@ -234,27 +241,31 @@ class NDenoiser_GUI:
         Connector.TestInstallation()
 
     def MenuDenoiser_CUDAFix(self):
-        Connector.CudaFix()
+        if messagebox.askokcancel("Neuroimage Denoiser GUI", "Do you really want to install the CUDA drivers for torch? You need this to use a NVIDIA GPU, but on other systems this may crash your installation. Do you want to continue?"):
+            Connector.CudaFix()
 
     def MenuDenoiser_Cancel(self):
         Connector.TryCanceling()
     
-    def MenuDenoiser_LocateModel(self):
+    def MenuDenoiser_ImportModel(self):
         file = filedialog.askopenfilename(parent=self.root, title="Neuroimage Denoiser - Select the model", 
                 filetypes=(("Pytorch model", "*.pt"),  
                            ("All files", "*.*")) )
         if file is None or file == "":
             return
-        Settings.SetSetting("model_path", file, save=True)
-        Logger.info(f"Set model path to {pathlib.Path(Settings.GetSettings('model_path'))}")
+        file = pathlib.Path(file)
+        shutil.copy(file, Settings.app_data_path / ("model" + file.suffix))
+        Settings.SetSetting("model_name", file.name, save=True)
+        self.varModelName.set(file.name)
+        logger.info(f"Imported model '{file.name}' into the application. As there is a copy of this file cached, you don't need to keep the file anymore")
 
     def MenuDenoiser_Denoise(self):
         outputpath = self.varTxtOutputPath.get()
         if outputpath is None or outputpath == "":
             self.root.bell()
-            Logger.error("Please first set an output path")
+            logger.error("Please first set an output path")
             return
-        Connector.Denoise(self.queueFiles, pathlib.Path(outputpath), pathlib.Path(Settings.GetSettings("model_path")), self.UpdateTVFiles)
+        Connector.Denoise(self.queueFiles, pathlib.Path(outputpath), self.UpdateTVFiles)
 
     def MenuAbout_Info(self):
         messagebox.showinfo("Neuroimage Denoiser", "Neuroimage Denoiser for removing noise from transient fluorescent signals in functional imaging\nStephan Weissbach, Jonas Milkovits, Michela Borghi, Carolina Amaral, Abderazzaq El Khallouqi, Susanne Gerber, Martin Heine bioRxiv 2024.06.08.598061; doi: https://doi.org/10.1101/2024.06.08.598061\n\nGUI Implementation by Andreas Brilka")
@@ -262,5 +273,31 @@ class NDenoiser_GUI:
     def MenuAbout_Debug(self):
         if(not messagebox.askyesnocancel("Neuroimage Denoiser", "Are you sure you want to enable debugging mode?")):
             return
-        Logger.level = LogLevel.DEBUG
-        Logger.debug("Enabled debugging output")
+        self.txtLoggingHandler.setLevel(logging.DEBUG)
+        logger.debug("Enabled debugging output")
+
+
+class LoggingHandlerTxt(logging.Handler):
+    """ Add a handler to capture the logs into a textbox """
+
+    def __init__(self, txt_log: scrolledtext.ScrolledText):
+        self.txt_log = txt_log
+        self.txt_log.tag_config('prefix', foreground='#3d6cd1')
+        self.txt_log.tag_config('error', foreground='#c73030')
+        self.txt_log.tag_config('darkgrey', foreground='#595959')
+        super().__init__()
+
+    def handle(self, record):
+        scrollDown = True if (self.txt_log.yview()[1] > 0.8) else False
+        tag = ""
+        if record.levelno >= logging.WARNING:
+            tag = "error"
+        elif record.levelno < logging.INFO:
+            tag = "darkgrey" 
+        self.txt_log.configure(state='normal')
+        self.txt_log.insert(tk.END, f"{datetime.now().strftime('[%x %X]:')} ", "prefix")
+        self.txt_log.insert(tk.END, f"{record.msg}\n", tag)
+        self.txt_log.configure(state='disabled')
+        if scrollDown:
+            self.txt_log.see(tk.END)
+        return True

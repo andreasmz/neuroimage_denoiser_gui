@@ -1,14 +1,18 @@
+import importlib.util
 from tkinter import messagebox
 import os
 import re
 import subprocess
 import threading
-import sys
 import pathlib
 from typing import IO
+import logging
+import sys
+import importlib
+logger = logging.getLogger("Neuroimage_Denoiser_GUI")
 
-from .logger import Logger
 from .utils import *
+from .config import NDenoiser_Settings as Settings
 
 class Connector:
 
@@ -17,98 +21,107 @@ class Connector:
     _threadStopRequest = False
 
     def ImportNDenoiser() -> bool:
-        envs = []
-        for p in os.environ["PATH"].split(";"):
-            r = re.findall(r"(?<=\\envs\\)\w*", p)
-            for x in r:
-                if x not in envs: envs.append(x)
-        Logger.info(f"Detected environments: {', '.join(envs)}")
-        try:
-            import neuroimage_denoiser as nd
-        except ModuleNotFoundError:
+        logger.info(f"Detected environment used: {os.environ['CONDA_DEFAULT_ENV'] if 'CONDA_DEFAULT_ENV' in os.environ.keys() else ''}")
+        logger.debug(', '.join(os.environ["PATH"].split(";")))
+        if importlib.util.find_spec("neuroimage_denoiser") is None:
+            logger.critical(f"Importlib can't find the Neuroimage Denoiser module. Terminating the program")
             messagebox.showerror("Neuroimage Denoiser GUI", "Can't find the Neuroimage Denoiser module. Terminating")
             exit()
-        Logger.info(f"Neuroimage Denoiser installed: True")
         return True
     
     def TestInstallation():
         def _run():
-            Logger.info("Testing installation. This may take some seconds...")
+            logger.info("--- Testing installation. This may take some seconds ---")
+            result = subprocess.run(["python", "-c", "import os; print(os.environ['CONDA_DEFAULT_ENV'] if 'CONDA_DEFAULT_ENV' in os.environ.keys() else '')"], env=os.environ.copy(), capture_output=True)
+            if len(result.stderr) > 0:
+                logger.error("Testing the environment threw an error: \n---\n%s\n---" % result.stderr.decode('utf-8'))
+                return
+            elif (env_import := result.stdout.decode('utf-8').removesuffix("\n").strip()) == (env_gui := (os.environ['CONDA_DEFAULT_ENV'] if 'CONDA_DEFAULT_ENV' in os.environ.keys() else None)):
+                logger.debug(f"The environment ('{env_gui}') is the same")
+            else:
+                logger.info(f"The environment differs between the GUI ('{env_gui}') and the Denoiser ('{env_import}'). This may be correct depending on your installation")
+            
             result = subprocess.run(["python", "-m", "neuroimage_denoiser"], env=os.environ.copy(), capture_output=True)
             re1 = re.search(r"(Neuroimage Denoiser)", result.stdout.decode("utf-8"))
             re2 = re.search(r"(positional arguments)", result.stdout.decode("utf-8"))
             if len(result.stderr) > 0:
-                Logger.error(f"Neuroimage Denoiser was not found. The error was '{result.stderr.decode('utf-8')}'")
+                logger.error("Trying to import Neuro Image Denoiser threw an error: \n---\n%s\n---" % result.stderr.decode('utf-8'))
                 return
-            elif re1 and re2:
-                Logger.info("Neuroimage Denoiser was found and seems to be working. Testing if CUDA is ready...")
+            elif not(re1 and re2):
+                logger.error("Neuroimage Denoiser was found, but it prompted an unexpected message: \n---\n%s\n---" % result.stdout.decode('utf-8'))
+                return
             else:
-                Logger.error("Neuroimage Denoiser was found, but it prompted an unexpected message")
-                Logger.info(f"The message was '{result.stdout.decode('utf-8')}'")
-                return
-            
-            try:
-                import torch
-            except ModuleNotFoundError:
-                Logger.error("Torch was not found")
-                return
-            if not torch.cuda.is_available():
-                Logger.error("CUDA is not available. It is NOT recommended to proceed")
-                return
-            Logger.info("CUDA is ready for use")
+                logger.info("Neuroimage Denoiser was found and seems to be working")
 
+            logger.info(f"Testing Torch and CUDA")
+
+            result = subprocess.run(["python", "-c", "import torch; print(torch.cuda.is_available())"], env=os.environ.copy(), capture_output=True)
+            if len(result.stderr) > 0:
+                logger.error("Testing for CUDA in torch threw an error: \n---\n%s\n---" % result.stderr.decode('utf-8'))
+                return
+            elif (rs := result.stdout.decode('utf-8').removesuffix("\n").strip()) not in ["True", "False"]:
+                logger.error("Torch was found, but it prompted an unexpected message: \n---\n%s\n---" % result.stdout.decode('utf-8'))
+                return
+            elif rs != "True":
+                logger.warning(f"Torch is ready, but does not use CUDA. The Denoiser will therefore fall back to CPU. It is not recommended to proceed, as this may increase runtime by magnitudes")
+
+            logger.info("CUDA is ready for use")
+            logger.info("--- Finished testing the installation ---") 
 
         t = threading.Thread(target=_run, daemon=True)
         t.start()
 
     def CudaFix():
-        args = "pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126 --upgrade"
-        Logger.info("Starting CUDA fix. Please wait---")
-        Logger.debug(args)
-        result = subprocess.run(args.split(" "), env=os.environ.copy(), capture_output=True)
-        for l in str(result.stderr.split("\n")):
-            Logger.error(l)
-        for l in str(result.stdout.split("\n")):
-            Logger.debug(l)
-        Logger.info("---Finished CUDA fix---")
+        def _run():
+            args = "python -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118 --upgrade"
+            logger.info("--- Installing CUDA fix. This may take several minutes. Please wait until you see a success message ---")
+            logger.debug(args)
+            result = subprocess.run(args.split(" "), env=os.environ.copy(), capture_output=True)
+            if len(result.stderr) > 0:
+                logger.error("Installing the CUDA fix threw an error: \n---\n%s\n---" % result.stderr.decode('utf-8'))
+            logger.debug("Output of the PIP command for installing CUDA fix: \n---\n%s\n---" % result.stdout.decode('utf-8'))
+            logger.info("---Finished installing CUDA fix---")
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
 
 
-    def Denoise(fileQueue:FileQueue, outputPath: pathlib.Path, modelPath: pathlib.Path, invalidateQueueCallback):
+    def Denoise(fileQueue:FileQueue, outputPath: pathlib.Path, invalidateQueueCallback):
         if outputPath is None or not outputPath.exists() or len(str(outputPath)) <= 3:
-            Logger.error("Your output path is invalid")
+            logger.warning("Your output path is invalid")
             return
-        if modelPath is None or not modelPath.exists():
-            Logger.error("Your model path is invalid")
+        if not (model_path := (Settings.app_data_path / "model.pt")).exists() or not model_path.is_file():
+            logger.warning(f"You first need to import a model. If you did, check if it is copied into users AppData folder")
             return
         def _run():
             if (fileQueue.PopQueued() is None):
-                Logger.info("There are no files in the queue")
+                logger.info("There are no files in the queue")
                 return
-            Logger.info("---Starting Denoising---")
+            logger.info("---Starting Denoising---")
             while (fileQueue.PopQueued() is not None):
                 if Connector._threadStopRequest:
-                    Logger.error("You aborted denoising")
+                    logger.warning("You aborted denoising")
                     break
                 qf = fileQueue.PopQueued()
                 qf.status = FileStatus.RUNNING
-                Logger.info(f"Denoising {qf.filename}")
+                logger.info(f"Denoising {qf.filename}")
                 invalidateQueueCallback()
                 if isinstance(qf, QueuedFile):
-                    params = ["python", "-m", "neuroimage_denoiser", "denoise", "--path", str(qf.path), "--outputpath", str(outputPath), "--modelpath", str(modelPath)]
+                    params = ["python", "-m", "neuroimage_denoiser", "denoise", "--path", str(qf.path), "--outputpath", str(outputPath), "--modelpath", str(model_path)]
                 elif isinstance(qf, QueuedFolder):
-                    params = ["python", "-m", "neuroimage_denoiser", "denoise", "--path", str(qf.path), "--outputpath", str(outputPath), "--modelpath", str(modelPath), "--directory_mode"]
+                    params = ["python", "-m", "neuroimage_denoiser", "denoise", "--path", str(qf.path), "--outputpath", str(outputPath), "--modelpath", str(model_path), "--directory_mode"]
                 else:
                     raise RuntimeError("A provided Queued Object has an invalid type")
-                Logger.debug(" ".join(params))
+                logger.debug(f"Running subprocess with the following args: {' '.join(params)}")
 
                 env = os.environ.copy()
                 env["PYTHONIOENCODING"] = "utf-8" # Alive progress in Stephans code needs utf-8. By default, python uses the wrong encoding. Setting the encoding in subprocess Popen only enables a conversion afterwards
                 Connector.currentSubprocess = subprocess.Popen(params, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", bufsize=-1)
                 Connector.currentSubprocess.wait()
                 Connector.ND_ProcessOutput(Connector.currentSubprocess.returncode, Connector.currentSubprocess.stdout, Connector.currentSubprocess.stderr, qf)
-                Logger.info(f"Finished {qf.filename}")
+                logger.info(f"Finished {qf.filename}")
                 invalidateQueueCallback()
-            Logger.info("---Finished Denoising---")
+            logger.info("---Finished Denoising---")
         Connector._threadStopRequest = False
         if Connector.Is_Denoising(): return
         Connector.thread = threading.Thread(target=_run, daemon=True)
@@ -127,37 +140,48 @@ class Connector:
             qf.status = FileStatus.ERROR
             return
         status = []
-        while (line := stderr.readline().removesuffix("\n")) != "":
-            if("FutureWarning: You are using `torch.load` with `weights_only=False`" in line):
-                Logger.info("Neuroimage Denoise issued FutureWarning on torch")
-                Logger.debug(line)
-                continue
-            elif("torch.load(weights" in line):
-                Logger.debug(line)
-                continue
-            elif(line.strip() == ""):
-                continue
+
+        known_error_lines = {"FutureWarning: You are using `torch.load` with `weights_only=False`": "Future Warning on Torch", "torch.load(weights": "Future Warning on Torch"}
+        stderr_known_errors = []
+        stderr_unknown_lines = []
+        while (line := stderr.readline().removesuffix("\n").strip()) != "":
+            for error_str,error_name in known_error_lines:
+                if error_str in line:
+                    stderr_known_errors.append(error_name)
+                    break
             else:
-                Logger.error(f"An unkown error was triggered: {line}")
-        while (line := stdout.readline().removesuffix("\n")) != "":
-            Logger.debug(line)
+                stderr_unknown_lines.append(line)
+
+        for error_name in stderr_known_errors:
+            match error_name:
+                case "Future Warning on Torch":
+                    logger.info(f"Neuroimage Denoiser issued a FutureWarning on torch")
+                case _:
+                    logger.info(f"There was an exception in the Denoiser output ('{error_name}'), but it is marked as not disturbing")
+        if len(stderr_unknown_lines) > 0:
+            logger.warning("There have been errors produced by Neuroimage Denoiser: \n---\n%s\n---" % '\n'.join(stderr_unknown_lines))
+
+        stdout_unknown_lines = []
+        while (line := stdout.readline().removesuffix("\n").strip()) != "":
             re1 = re.search(r"on ([0-9]{1,3}): Skipped (.+), because file already exists", line)
             re2 = re.search(r"on ([0-9]{1,3}): Skipped (.+), due to an unexpected error", line)
             re3 = re.search(r"on ([0-9]{1,3}): Saved image \(([^\)]+)\) as:", line)
-            if(line.strip() == ""):
-                continue
-            elif re1:
+            if re1:
                 status.append(FileStatus.ERROR_FILE_EXISTS)
-                Logger.error(f"Skipped {re1.groups(1)}, as the output file already exists")
+                logger.warning(f"[Denoiser] Skipped {re1.groups(1)}, as the output file already exists")
             elif re2:
                 status.append(FileStatus.ERROR_NDENOISER_UNKOWN)
-                Logger.error(f"Unkown error on {re1.groups(1)}")
+                logger.warning(f"[Denoiser] Unkown error on {re1.groups(1)}")
             elif re3:
                 status.append(FileStatus.FINISHED)
             elif(re.search(r"\| [0-9]{0,3}\/[0-9]{0,3} \[[0-9]{1,3}\%\] in ", line)):
                 status.append(FileStatus.FINISHED)
             else:
-                Logger.info(f"Unparsed output from Image Denoiser: '{line}'")
+                stdout_unknown_lines.append(line)
+        
+        if len(stdout_unknown_lines) > 0:
+            logger.warning("There is unparsed output produced by Neuroimage Denoiser: \n---\n%s\n---" % '\n'.join(stdout_unknown_lines))
+
         qf.status = FileStatus.Get_MostSignificant(status)
         if (qf.status == None):
             if returncode == 1:
@@ -172,6 +196,6 @@ class Connector:
             _sp_running = True
             Connector.currentSubprocess.terminate()
         if not _sp_running and (Connector.thread is None or not Connector.thread.is_alive()): 
-            Logger.info("There is no denoising running")
+            logger.info("There is no denoising running")
         else:
-            Logger.error("Canceled denoising")
+            logger.warning("Canceled denoising")
