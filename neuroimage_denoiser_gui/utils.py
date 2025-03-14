@@ -9,10 +9,10 @@ class FileStatus(Enum):
     FINISHED = "Finished"
     EARLY_TERMINATED = "Early terminated"
     UNKOWN = "Unkown"
-    NO_OUTPUT = "Unkown due to no output"
+    NO_OUTPUT = "Denoiser did not respond"
     ERROR = "Failed"
     ERROR_FILE_EXISTS = "Output file already exists"
-    ERROR_NDENOISER_UNKOWN = "Unexpected Error in DENOISER"
+    ERROR_NDENOISER_UNKOWN = "Unexpected Error in Denoiser"
 
     def Get_Color(fs):
         match (fs):

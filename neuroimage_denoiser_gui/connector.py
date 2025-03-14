@@ -22,7 +22,6 @@ class Connector:
 
     def ImportNDenoiser() -> bool:
         logger.info(f"Detected environment used: {os.environ['CONDA_DEFAULT_ENV'] if 'CONDA_DEFAULT_ENV' in os.environ.keys() else ''}")
-        logger.debug(', '.join(os.environ["PATH"].split(";")))
         if importlib.util.find_spec("neuroimage_denoiser") is None:
             logger.critical(f"Importlib can't find the Neuroimage Denoiser module. Terminating the program")
             messagebox.showerror("Neuroimage Denoiser GUI", "Can't find the Neuroimage Denoiser module. Terminating")
@@ -32,35 +31,37 @@ class Connector:
     def TestInstallation():
         def _run():
             logger.info("--- Testing installation. This may take some seconds ---")
-            result = subprocess.run(["python", "-c", "import os; print(os.environ['CONDA_DEFAULT_ENV'] if 'CONDA_DEFAULT_ENV' in os.environ.keys() else '')"], env=os.environ.copy(), capture_output=True)
+            env = os.environ.copy()
+            env["PYTHONIOENCODING"] = "utf-8"
+            result = subprocess.run(["python", "-c", "import os; print(os.environ['CONDA_DEFAULT_ENV'] if 'CONDA_DEFAULT_ENV' in os.environ.keys() else '')"], env=env, capture_output=True, encoding="utf-8")
             if len(result.stderr) > 0:
-                logger.error("Testing the environment threw an error: \n---\n%s\n---" % result.stderr.decode('utf-8'))
+                logger.error("Testing the environment threw an error: \n---\n%s\n---" % result.stderr)
                 return
-            elif (env_import := result.stdout.decode('utf-8').removesuffix("\n").strip()) == (env_gui := (os.environ['CONDA_DEFAULT_ENV'] if 'CONDA_DEFAULT_ENV' in os.environ.keys() else None)):
+            elif (env_import := result.stdout.removesuffix("\n").strip()) == (env_gui := (os.environ['CONDA_DEFAULT_ENV'] if 'CONDA_DEFAULT_ENV' in os.environ.keys() else None)):
                 logger.debug(f"The environment ('{env_gui}') is the same")
             else:
                 logger.info(f"The environment differs between the GUI ('{env_gui}') and the Denoiser ('{env_import}'). This may be correct depending on your installation")
             
-            result = subprocess.run(["python", "-m", "neuroimage_denoiser"], env=os.environ.copy(), capture_output=True)
-            re1 = re.search(r"(Neuroimage Denoiser)", result.stdout.decode("utf-8"))
-            re2 = re.search(r"(positional arguments)", result.stdout.decode("utf-8"))
+            result = subprocess.run(["python", "-m", "neuroimage_denoiser"], env=env, capture_output=True, encoding="utf-8")
+            re1 = re.search(r"(Neuroimage Denoiser)", result.stdout)
+            re2 = re.search(r"(positional arguments)", result.stdout)
             if len(result.stderr) > 0:
-                logger.error("Trying to import Neuro Image Denoiser threw an error: \n---\n%s\n---" % result.stderr.decode('utf-8'))
+                logger.error("Trying to import Neuro Image Denoiser threw an error: \n---\n%s\n---" % result.stderr)
                 return
             elif not(re1 and re2):
-                logger.error("Neuroimage Denoiser was found, but it prompted an unexpected message: \n---\n%s\n---" % result.stdout.decode('utf-8'))
+                logger.error("Neuroimage Denoiser was found, but it prompted an unexpected message: \n---\n%s\n---" % result.stdout)
                 return
             else:
                 logger.info("Neuroimage Denoiser was found and seems to be working")
 
             logger.info(f"Testing Torch and CUDA")
 
-            result = subprocess.run(["python", "-c", "import torch; print(torch.cuda.is_available())"], env=os.environ.copy(), capture_output=True)
+            result = subprocess.run(["python", "-c", "import torch; print(torch.cuda.is_available())"], env=env, capture_output=True, encoding="utf-8")
             if len(result.stderr) > 0:
-                logger.error("Testing for CUDA in torch threw an error: \n---\n%s\n---" % result.stderr.decode('utf-8'))
+                logger.error("Testing for CUDA in torch threw an error: \n---\n%s\n---" % result.stderr)
                 return
-            elif (rs := result.stdout.decode('utf-8').removesuffix("\n").strip()) not in ["True", "False"]:
-                logger.error("Torch was found, but it prompted an unexpected message: \n---\n%s\n---" % result.stdout.decode('utf-8'))
+            elif (rs := result.stdout.removesuffix("\n").strip()) not in ["True", "False"]:
+                logger.error("Torch was found, but it prompted an unexpected message: \n---\n%s\n---" % result.stdout)
                 return
             elif rs != "True":
                 logger.warning(f"Torch is ready, but does not use CUDA. The Denoiser will therefore fall back to CPU. It is not recommended to proceed, as this may increase runtime by magnitudes")

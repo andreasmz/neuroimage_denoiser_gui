@@ -7,6 +7,8 @@ import gpustat
 import subprocess
 from datetime import datetime
 import shutil
+import platform
+import os
 
 import logging
 logger = logging.getLogger("Neuroimage_Denoiser_GUI")
@@ -19,13 +21,18 @@ from .config import NDenoiser_Settings as Settings
 class NDenoiser_GUI:
 
     def __init__(self):
+        self.gpu_error = None # If a query for the GPU fails, only log the first message
+        self.gpu_stats = None # The first GPU request is logged
+
         self.queueFiles = FileQueue()
         self.InitGUI()
 
     def InitGUI(self):
         self.root = tk.Tk()
+        self.root.iconbitmap(default=pathlib.Path(__file__).parent / "icon.ico")
         self.root.title("Neuroimage Denoiser GUI")
         self.root.geometry("900x600")
+        
 
         self.frameStatusbar = tk.Frame(self.root)
         self.frameStatusbar.pack(side=tk.BOTTOM, fill="x")
@@ -74,6 +81,7 @@ class NDenoiser_GUI:
         self.menubar.add_cascade(label="About", menu=self.menuAbout)
         self.menuAbout.add_command(label="Info", command=self.MenuAbout_Info)
         self.menuAbout.add_command(label="Start debugging", command=self.MenuAbout_Debug)
+        self.menuAbout.add_command(label="Open logs", command=self.MenuAbout_OpenLog)
 
         self.frameTools = tk.Frame(self.root)
         self.frameTools.pack(side=tk.TOP, fill="x")
@@ -112,8 +120,6 @@ class NDenoiser_GUI:
         self.btnDenoise.pack(side=tk.LEFT, padx=15)
         self.btnCancel = tk.Button(self.frameToolsInner, text="Cancel Denoising", command=self.MenuDenoiser_Cancel)
         self.btnCancel.pack(side=tk.LEFT,padx=15)
-        #self.lblQueueStatus = tk.Label(self.frameToolsRight, text="", width=20)
-        #self.lblQueueStatus.pack()
 
 
         self.tvFiles = ttk.Treeview(self.root, columns=("Status", "Path", "Name"))
@@ -136,19 +142,23 @@ class NDenoiser_GUI:
         self.root.mainloop()
 
     def _Statusbar_Tick(self):
-        def _printGPUStats(gpu_stats):
-            # Yeah, I know is a bit hacking. But it works!
+        def _printGPUStats(gpu_stats: gpustat.GPUStatCollection):
+            if self.gpu_stats is None:
+                self.gpu_stats = gpu_stats
+                logger.debug(f"Nvidia driver {gpu_stats.driver_version} ({gpu_stats.hostname})")
+                for i, g in enumerate(gpu_stats.gpus):
+                    logger.debug(f"GPU {i}: {g.name} ({g.power_limit}W, {g.memory_total}MB)")
             self.lblStatusGPU["text"] = f"Nvidia driver {gpu_stats.driver_version}"
             self.lblStatusGPU2["text"] = ""
             self.lblStatusGPU3["text"] = ""
             if len(gpu_stats.gpus) == 0:
                 return
             if len(gpu_stats.gpus) >= 1:
-                g = gpu_stats.gpus[0]
-                self.lblStatusGPU2["text"] = f"{g.name}: {g.utilization}% {g.temperature}°C"
+                g: gpustat.GPUStat = gpu_stats.gpus[0] 
+                self.lblStatusGPU2["text"] = f"{g.name}: {g.utilization}% {g.temperature}°C {g.power_draw}W"
             if len(gpu_stats.gpus) >= 2:
-                g = gpu_stats.gpus[1]
-                self.lblStatusGPU2["text"] = f"{g.name}: {g.utilization}% {g.temperature}°C"
+                g: gpustat.GPUStat = gpu_stats.gpus[1]
+                self.lblStatusGPU3["text"] = f"{g.name}: {g.utilization}% {g.temperature}°C {g.power_draw}W"
         self.lblStatusCPU["text"] = f"CPU: {psutil.cpu_percent(interval=None)}%"
         self.lblStatusRAM["text"] = f"Memory: {psutil.virtual_memory().percent}%"
         try:
@@ -158,7 +168,10 @@ class NDenoiser_GUI:
             self.lblStatusGPU["text"] = "GPU: Not available"
             self.lblStatusGPU2["text"] = ""
             self.lblStatusGPU3["text"] = ""
-        self.root.after(2000, self._Statusbar_Tick)
+            if self.gpu_error is None:
+                self.gpu_error = ex
+                logger.debug(f"Failed to query the GPU stats. The error was:\n---\n%s\n---" % str(ex))
+        self.root.after(1000, self._Statusbar_Tick)
 
     def UpdateTVFiles(self):
         _files = [x for x in self.queueFiles.keys()]
@@ -222,7 +235,12 @@ class NDenoiser_GUI:
         if not path.exists():
             messagebox.showerror("Neuroimage Denoiser", "The path is invalid")
             return
-        subprocess.Popen(["explorer", path])
+        if platform.system() == 'Darwin': # macOS
+            subprocess.call(('open', path))
+        elif platform.system() == 'Windows': # Windows
+            os.startfile(path)
+        else: # linux variants
+            subprocess.call(('xdg-open', path))
 
     def MenuFile_RemoveSelected(self):
         if len(self.tvFiles.selection()) != 1:
@@ -275,6 +293,15 @@ class NDenoiser_GUI:
             return
         self.txtLoggingHandler.setLevel(logging.DEBUG)
         logger.debug("Enabled debugging output")
+
+    def MenuAbout_OpenLog(self):
+        path = Settings.app_data_path / "log.txt"
+        if platform.system() == 'Darwin': # macOS
+            subprocess.call(('open', path))
+        elif platform.system() == 'Windows': # Windows
+            os.startfile(path)
+        else: # linux variants
+            subprocess.call(('xdg-open', path))
 
 
 class LoggingHandlerTxt(logging.Handler):
