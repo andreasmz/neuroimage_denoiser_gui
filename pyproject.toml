@@ -1,6 +1,6 @@
 [project]
 name = "neuroimage_denoiser_gui"
-version = "1.4.2"
+version = "1.4.4"
 authors = [
   { name="Andreas Brilka"},
   { name="Stephan Weißbach"}

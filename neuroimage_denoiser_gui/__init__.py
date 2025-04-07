@@ -4,7 +4,7 @@ import threading
 from logging.handlers import RotatingFileHandler
 from .config import NDenoiser_Settings as Settings
 
-__version__ = "1.4.2"
+__version__ = "1.4.4"
 
 fh = RotatingFileHandler(Settings.app_data_path / "log.txt", mode="a", maxBytes=(1024**2), backupCount=10)
 fh.setFormatter(logging.Formatter('[%(asctime)s %(levelname)s]: %(message)s'))

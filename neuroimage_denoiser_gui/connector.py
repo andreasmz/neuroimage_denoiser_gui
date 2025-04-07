@@ -146,7 +146,7 @@ class Connector:
         stderr_known_errors = []
         stderr_unknown_lines = []
         while (line := stderr.readline().removesuffix("\n").strip()) != "":
-            for error_str,error_name in known_error_lines:
+            for error_str,error_name in known_error_lines.items():
                 if error_str in line:
                     stderr_known_errors.append(error_name)
                     break
